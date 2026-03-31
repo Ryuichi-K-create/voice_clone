@@ -19,7 +19,7 @@ import yaml
 
 # CUDA状態をログ出力
 if torch.cuda.is_available():
-    logger.info(f"CUDA: 有効 (GPU: {torch.cuda.get_device_name(0)}, VRAM: {torch.cuda.get_device_properties(0).total_mem / 1024**3:.1f}GB)")
+    logger.info(f"CUDA: 有効 (GPU: {torch.cuda.get_device_name(0)}, VRAM: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f}GB)")
 else:
     logger.warning(f"CUDA: 無効 (PyTorch版: {torch.__version__}, CUDA版でない場合はGPUが使えません)")
 
@@ -106,7 +106,7 @@ def on_register(
     )
 
 
-def on_generate(text: str, language: str) -> tuple[str | None, str | None, str | None]:
+def on_generate(text: str, language: str, dl_format: str) -> tuple[str | None, str | None, str | None, str | None]:
     """音声生成処理。"""
     if current_prompt is None:
         raise gr.Error("先に声を登録するか、保存済みの声を読み込んでください。")
@@ -131,8 +131,22 @@ def on_generate(text: str, language: str) -> tuple[str | None, str | None, str |
     # スペクトログラム生成
     gen_spec = audio_utils.generate_spectrogram(wav_path, "生成音声スペクトログラム")
 
+    # 選択された形式のファイルをダウンロードに設定
+    dl_path = mp3_path if dl_format == "MP3" else wav_path
+
     logger.info(f"音声を保存しました: {wav_path}, {mp3_path}")
-    return wav_path, gr.update(value=mp3_path, visible=True), gen_spec
+    return wav_path, dl_path, wav_path, gen_spec
+
+
+def on_switch_format(dl_format: str, wav_state: str | None) -> str | None:
+    """ダウンロード形式の切り替え。"""
+    if wav_state is None:
+        return None
+    if dl_format == "MP3":
+        mp3_path = wav_state.replace(".wav", ".mp3")
+        if os.path.exists(mp3_path):
+            return mp3_path
+    return wav_state
 
 
 def on_load_prompt(prompt_name: str | None) -> str:
@@ -164,7 +178,12 @@ def on_delete_prompt(prompt_name: str | None) -> tuple[str, gr.update]:
 
 def build_ui() -> gr.Blocks:
     """Gradio UIを構築する。"""
-    with gr.Blocks(title="Voice Clone TTS", theme=gr.themes.Soft()) as demo:
+    custom_css = """
+    @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&display=swap');
+    * { font-family: 'EB Garamond', 'Times New Roman', Times, serif, 'Noto Sans JP', sans-serif !important; }
+    textarea, input, select, button { font-family: 'EB Garamond', 'Times New Roman', Times, serif, 'Noto Sans JP', sans-serif !important; }
+    """
+    with gr.Blocks(title="Voice Clone TTS", theme=gr.themes.Soft(), css=custom_css) as demo:
         gr.Markdown("# Voice Clone TTS\n自分の声をアップロードして、任意のテキストを音読させよう")
 
         with gr.Group():
@@ -188,7 +207,17 @@ def build_ui() -> gr.Blocks:
             ref_spectrogram = gr.Image(label="参照音声スペクトログラム", visible=True)
 
         with gr.Group():
-            gr.Markdown("### Step 2: テキストを入力")
+            gr.Markdown("### Step 2: 声を選択")
+            saved_prompts = gr.Dropdown(
+                label="保存済みの声を選択",
+                choices=engine.list_prompts() if engine else [],
+            )
+            load_btn = gr.Button("読み込む")
+            delete_btn = gr.Button("削除", variant="stop")
+            action_status = gr.Textbox(label="ステータス", interactive=False)
+
+        with gr.Group():
+            gr.Markdown("### Step 3: テキストを入力")
             text_input = gr.Textbox(
                 label="読み上げたいテキスト",
                 lines=5,
@@ -201,18 +230,15 @@ def build_ui() -> gr.Blocks:
             )
             generate_btn = gr.Button("音声を生成", variant="primary")
             audio_output = gr.Audio(label="生成結果", type="filepath")
-            mp3_download = gr.File(label="MP3ダウンロード", visible=False)
+            with gr.Row():
+                dl_format = gr.Radio(
+                    choices=["WAV", "MP3"],
+                    value="WAV",
+                    label="ダウンロード形式",
+                )
+                dl_file = gr.File(label="ダウンロード")
+            wav_state = gr.State(value=None)
             gen_spectrogram = gr.Image(label="生成音声スペクトログラム", visible=True)
-
-        with gr.Group():
-            gr.Markdown("### 登録済みの声")
-            saved_prompts = gr.Dropdown(
-                label="保存済みの声を選択",
-                choices=engine.list_prompts() if engine else [],
-            )
-            load_btn = gr.Button("読み込む")
-            delete_btn = gr.Button("削除", variant="stop")
-            action_status = gr.Textbox(label="ステータス", interactive=False)
 
         # イベントバインディング
         audio_input.change(
@@ -227,8 +253,13 @@ def build_ui() -> gr.Blocks:
         )
         generate_btn.click(
             fn=on_generate,
-            inputs=[text_input, language_select],
-            outputs=[audio_output, mp3_download, gen_spectrogram],
+            inputs=[text_input, language_select, dl_format],
+            outputs=[audio_output, dl_file, wav_state, gen_spectrogram],
+        )
+        dl_format.change(
+            fn=on_switch_format,
+            inputs=[dl_format, wav_state],
+            outputs=[dl_file],
         )
         load_btn.click(
             fn=on_load_prompt,

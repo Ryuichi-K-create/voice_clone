@@ -60,6 +60,20 @@ echo ""
 echo "=== 依存パッケージをインストール中 ==="
 uv pip install -r requirements.txt
 
+# CUDA対応PyTorchのインストール（GPU環境の場合）
+echo ""
+echo "=== PyTorch CUDA版を確認中 ==="
+if python -c "import torch; assert '+cu' in torch.__version__" 2>/dev/null; then
+    echo "PyTorch CUDA版: 既にインストール済み"
+else
+    if [[ "$(uname -s)" == MINGW* ]] || [[ "$(uname -s)" == MSYS* ]] || [[ "$(uname -s)" == CYGWIN* ]] || command -v nvidia-smi &> /dev/null; then
+        echo "NVIDIA GPUを検出。PyTorch CUDA版をインストール中..."
+        uv pip install --reinstall torch torchaudio --index-url https://download.pytorch.org/whl/cu126
+    else
+        echo "NVIDIA GPUが検出されませんでした。CPU版のまま使用します。"
+    fi
+fi
+
 # ディレクトリ作成
 mkdir -p models docs prompts output
 
