@@ -25,7 +25,9 @@ voice-clone-tts/
 ├── requirements.txt        # 依存パッケージ
 ├── setup.sh                # セットアップスクリプト
 ├── README.md               # 使い方ドキュメント
-├── prompts/                # 保存済み voice clone prompt (.pkl)
+├── models/                 # 保存済み voice clone prompt (.pkl)
+├── docs/                   # ドキュメント（recording_script.md等）
+├── prompts/                # プロンプト設計メモ
 └── output/                 # 生成された音声ファイル
 ```
 

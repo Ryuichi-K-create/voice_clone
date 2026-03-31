@@ -18,8 +18,9 @@ generation:
   chunk_max_chars: 100
 
 paths:
-  prompts_dir: "prompts"
+  prompts_dir: "models"
   output_dir: "output"
+  ffmpeg_dir: "C:/Users/Scent/AppData/Local/Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe/ffmpeg-8.1-full_build/bin"
 
 server:
   host: "0.0.0.0"

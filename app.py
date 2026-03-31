@@ -12,9 +12,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 logger.info("ライブラリを読み込み中...")
+import torch
 import gradio as gr
 import soundfile as sf
 import yaml
+
+# CUDA状態をログ出力
+if torch.cuda.is_available():
+    logger.info(f"CUDA: 有効 (GPU: {torch.cuda.get_device_name(0)}, VRAM: {torch.cuda.get_device_properties(0).total_mem / 1024**3:.1f}GB)")
+else:
+    logger.warning(f"CUDA: 無効 (PyTorch版: {torch.__version__}, CUDA版でない場合はGPUが使えません)")
 
 import audio_utils
 logger.info("Qwen3-TTSモジュールを読み込み中（初回は時間がかかります）...")

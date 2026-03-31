@@ -20,7 +20,7 @@ bash setup.sh
 
 ```bash
 pip install -r requirements.txt
-mkdir -p prompts output
+mkdir -p models docs prompts output
 ```
 
 ## 起動

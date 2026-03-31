@@ -102,12 +102,24 @@ class VoiceCloneEngine:
         return path
 
     def load_prompt(self, name: str) -> dict:
-        """保存済みpromptを読み込む。"""
+        """保存済みpromptを読み込む。デバイスが異なる場合は自動変換。"""
+        import io
+
         path = os.path.join(self.prompts_dir, f"{name}.pkl")
         if not os.path.exists(path):
             raise FileNotFoundError(f"Promptが見つかりません: {path}")
+
+        # CUDAで保存されたpromptを別デバイスでも読めるようにカスタムUnpicklerを使用
+        device = self.device
+
+        class _MapLocationUnpickler(pickle.Unpickler):
+            def find_class(self, module, name):
+                if module == "torch.storage" and name == "_load_from_bytes":
+                    return lambda b: torch.load(io.BytesIO(b), map_location=device, weights_only=False)
+                return super().find_class(module, name)
+
         with open(path, "rb") as f:
-            return pickle.load(f)
+            return _MapLocationUnpickler(f).load()
 
     def list_prompts(self) -> list[str]:
         """保存済みprompt一覧を返す（.pklファイル名から拡張子除去）。"""

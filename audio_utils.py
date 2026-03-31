@@ -1,6 +1,7 @@
 """音声ファイル処理ユーティリティ"""
 
 import logging
+import os
 import subprocess
 import tempfile
 import wave
@@ -19,6 +20,12 @@ logger = logging.getLogger(__name__)
 # 設定ファイル読み込み
 with open("config.yaml", "r", encoding="utf-8") as f:
     _config = yaml.safe_load(f)
+
+# FFmpegのPATHを自動設定
+_ffmpeg_dir = _config["paths"].get("ffmpeg_dir", "")
+if _ffmpeg_dir and os.path.isdir(_ffmpeg_dir) and _ffmpeg_dir not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = _ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+    logger.info(f"FFmpegのPATHを追加しました: {_ffmpeg_dir}")
 
 _SAMPLE_RATE = _config["audio"]["sample_rate"]
 _MIN_SEC = _config["audio"]["min_duration_sec"]

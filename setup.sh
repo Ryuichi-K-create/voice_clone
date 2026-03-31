@@ -61,7 +61,7 @@ echo "=== 依存パッケージをインストール中 ==="
 uv pip install -r requirements.txt
 
 # ディレクトリ作成
-mkdir -p prompts output
+mkdir -p models docs prompts output
 
 echo ""
 echo "=== セットアップ完了 ==="
