@@ -35,6 +35,7 @@ with open("config.yaml", "r", encoding="utf-8") as f:
 # グローバルにエンジンを保持（起動時にモデルロード）
 engine: VoiceCloneEngine | None = None
 current_prompt: dict | None = None
+current_prompt_name: str | None = None
 
 
 def on_upload(audio_file: str | None) -> str:
@@ -71,7 +72,7 @@ def on_register(
     prompt_name: str,
 ) -> tuple[str, gr.update, str | None]:
     """声の登録処理。promptを生成・保存する。"""
-    global current_prompt
+    global current_prompt, current_prompt_name
 
     if audio_file is None:
         raise gr.Error("音声ファイルをアップロードしてください。")
@@ -90,6 +91,7 @@ def on_register(
     # Prompt生成
     ref_text = transcript.strip() if transcript.strip() else None
     current_prompt = engine.create_voice_prompt(tmp_wav, ref_text)
+    current_prompt_name = prompt_name.strip()
 
     # 保存
     engine.save_prompt(current_prompt, prompt_name.strip())
@@ -134,8 +136,11 @@ def on_generate(text: str, language: str, dl_format: str) -> tuple[str | None, s
     # 選択された形式のファイルをダウンロードに設定
     dl_path = mp3_path if dl_format == "MP3" else wav_path
 
+    # 音声ラベルに声の名前を表示
+    label = f"生成結果 ― {current_prompt_name} から生成" if current_prompt_name else "生成結果"
+
     logger.info(f"音声を保存しました: {wav_path}, {mp3_path}")
-    return wav_path, dl_path, wav_path, gen_spec
+    return gr.update(value=wav_path, label=label), dl_path, wav_path, gen_spec
 
 
 def on_switch_format(dl_format: str, wav_state: str | None) -> str | None:
@@ -151,12 +156,13 @@ def on_switch_format(dl_format: str, wav_state: str | None) -> str | None:
 
 def on_load_prompt(prompt_name: str | None) -> str:
     """保存済みpromptの読み込み。"""
-    global current_prompt
+    global current_prompt, current_prompt_name
 
     if not prompt_name:
         raise gr.Error("読み込む声を選択してください。")
 
     current_prompt = engine.load_prompt(prompt_name)
+    current_prompt_name = prompt_name
     return f"「{prompt_name}」を読み込みました。"
 
 
