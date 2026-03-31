@@ -1,6 +1,13 @@
 {
   "permissions": {
     "allow": [
+      "Read",
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "Glob",
+      "Grep",
+      "Bash",
       "Bash(chmod:*)",
       "Bash(sysctl -n machdep.cpu.brand_string)",
       "Bash(sysctl -n hw.memsize)",
@@ -19,6 +26,56 @@
       "Bash(tar -xjf /tmp/sox-14.4.2.tar.bz2 -C /tmp/)",
       "Bash(~/.local/bin/sox --version)",
       "Bash(pkill -f \"python app.py\")"
+    ],
+
+    "ask": [
+      "Bash(pip install *)",
+      "Bash(pip3 install *)",
+      "Bash(npm install *)",
+      "Bash(npm i *)",
+      "Bash(yarn add *)",
+      "Bash(pnpm add *)",
+      "Bash(cargo install *)",
+      "Bash(brew install *)",
+      "Bash(choco install *)",
+      "Bash(winget install *)",
+      "Bash(scoop install *)",
+      "Bash(apt install *)",
+      "Bash(apt-get install *)",
+
+      "Bash(rm -r *)",
+
+      "Edit(.claude/settings.json)",
+      "Edit(.claude/settings.local.json)",
+      "Write(.claude/settings.json)",
+      "Write(.claude/settings.local.json)"
+    ],
+
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(rmdir /s *)",
+      "Bash(del /s *)",
+
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git reset --hard *)",
+      "Bash(git clean -fd *)",
+
+      "Bash(sudo *)",
+      "Bash(format *)",
+      "Bash(mkfs *)",
+
+      "Read(.env)",
+      "Read(**/.env)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/*secret*)",
+      "Read(**/*credential*)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.claude/.credentials.json)"
     ]
-  }
+  },
+  "language": "japanese",
+  "voiceEnabled": true
 }
