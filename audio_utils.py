@@ -2,11 +2,17 @@
 
 import logging
 import subprocess
+import tempfile
 import wave
 
 import torch
 import numpy as np
 import yaml
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import librosa
+import librosa.display
 
 logger = logging.getLogger(__name__)
 
@@ -109,3 +115,44 @@ def transcribe_audio(wav_path: str, language: str = "ja") -> str:
     logger.info(f"書き起こし完了: {text}")
 
     return text
+
+
+def generate_spectrogram(audio_path: str, title: str = "スペクトログラム") -> str:
+    """音声ファイルからメルスペクトログラム画像を生成し、一時ファイルパスを返す。"""
+    y, sr = librosa.load(audio_path, sr=None)
+    mel_spec = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=128, fmax=8000)
+    mel_spec_db = librosa.power_to_db(mel_spec, ref=np.max)
+
+    fig, ax = plt.subplots(figsize=(10, 3))
+    img = librosa.display.specshow(
+        mel_spec_db, sr=sr, x_axis="time", y_axis="mel",
+        fmax=8000, ax=ax, cmap="magma",
+    )
+    fig.colorbar(img, ax=ax, format="%+2.0f dB")
+    ax.set_title(title)
+    ax.set_xlabel("時間 (秒)")
+    ax.set_ylabel("周波数 (Hz)")
+    fig.tight_layout()
+
+    tmp_path = tempfile.mktemp(suffix=".png")
+    fig.savefig(tmp_path, dpi=120)
+    plt.close(fig)
+    return tmp_path
+
+
+def convert_wav_to_mp3(wav_path: str, mp3_path: str, bitrate: str = "192k") -> str:
+    """WAVファイルをMP3に変換する。FFmpegを使用。"""
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", wav_path,
+        "-codec:a", "libmp3lame",
+        "-b:a", bitrate,
+        mp3_path,
+    ]
+    try:
+        subprocess.run(cmd, capture_output=True, text=True, check=True)
+    except FileNotFoundError:
+        raise RuntimeError("FFmpegが見つかりません。")
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"MP3変換に失敗しました: {e.stderr}")
+    return mp3_path

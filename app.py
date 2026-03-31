@@ -62,7 +62,7 @@ def on_register(
     audio_file: str | None,
     transcript: str,
     prompt_name: str,
-) -> tuple[str, gr.update]:
+) -> tuple[str, gr.update, str | None]:
     """声の登録処理。promptを生成・保存する。"""
     global current_prompt
 
@@ -87,15 +87,19 @@ def on_register(
     # 保存
     engine.save_prompt(current_prompt, prompt_name.strip())
 
+    # スペクトログラム生成
+    ref_spec = audio_utils.generate_spectrogram(tmp_wav, "参照音声スペクトログラム")
+
     # ドロップダウン更新
     choices = engine.list_prompts()
     return (
         f"「{prompt_name.strip()}」として登録しました。",
         gr.update(choices=choices, value=prompt_name.strip()),
+        ref_spec,
     )
 
 
-def on_generate(text: str, language: str) -> str | None:
+def on_generate(text: str, language: str) -> tuple[str | None, str | None, str | None]:
     """音声生成処理。"""
     if current_prompt is None:
         raise gr.Error("先に声を登録するか、保存済みの声を読み込んでください。")
@@ -105,16 +109,23 @@ def on_generate(text: str, language: str) -> str | None:
     # 音声生成
     audio_array, sample_rate = engine.generate_long(text.strip(), current_prompt, language)
 
-    # ファイル保存
+    # ファイル保存（WAV）
     output_dir = config["paths"]["output_dir"]
     os.makedirs(output_dir, exist_ok=True)
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_text = text.strip()[:10].replace("/", "_").replace("\\", "_")
-    output_path = os.path.join(output_dir, f"{timestamp}_{safe_text}.wav")
-    sf.write(output_path, audio_array, sample_rate)
+    wav_path = os.path.join(output_dir, f"{timestamp}_{safe_text}.wav")
+    sf.write(wav_path, audio_array, sample_rate)
 
-    logger.info(f"音声を保存しました: {output_path}")
-    return output_path
+    # MP3に変換
+    mp3_path = wav_path.replace(".wav", ".mp3")
+    audio_utils.convert_wav_to_mp3(wav_path, mp3_path)
+
+    # スペクトログラム生成
+    gen_spec = audio_utils.generate_spectrogram(wav_path, "生成音声スペクトログラム")
+
+    logger.info(f"音声を保存しました: {wav_path}, {mp3_path}")
+    return wav_path, gr.update(value=mp3_path, visible=True), gen_spec
 
 
 def on_load_prompt(prompt_name: str | None) -> str:
@@ -167,6 +178,7 @@ def build_ui() -> gr.Blocks:
             )
             register_btn = gr.Button("声を登録", variant="primary")
             register_status = gr.Textbox(label="ステータス", interactive=False)
+            ref_spectrogram = gr.Image(label="参照音声スペクトログラム", visible=True)
 
         with gr.Group():
             gr.Markdown("### Step 2: テキストを入力")
@@ -182,6 +194,8 @@ def build_ui() -> gr.Blocks:
             )
             generate_btn = gr.Button("音声を生成", variant="primary")
             audio_output = gr.Audio(label="生成結果", type="filepath")
+            mp3_download = gr.File(label="MP3ダウンロード", visible=False)
+            gen_spectrogram = gr.Image(label="生成音声スペクトログラム", visible=True)
 
         with gr.Group():
             gr.Markdown("### 登録済みの声")
@@ -202,12 +216,12 @@ def build_ui() -> gr.Blocks:
         register_btn.click(
             fn=on_register,
             inputs=[audio_input, transcript_box, prompt_name_input],
-            outputs=[register_status, saved_prompts],
+            outputs=[register_status, saved_prompts, ref_spectrogram],
         )
         generate_btn.click(
             fn=on_generate,
             inputs=[text_input, language_select],
-            outputs=[audio_output],
+            outputs=[audio_output, mp3_download, gen_spectrogram],
         )
         load_btn.click(
             fn=on_load_prompt,
