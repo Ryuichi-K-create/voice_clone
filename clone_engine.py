@@ -183,6 +183,7 @@ class VoiceCloneEngine:
         for i, chunk in enumerate(final_chunks):
             logger.info(f"チャンク {i + 1}/{len(final_chunks)}: {chunk[:30]}...")
             audio, sr = self.generate(chunk, prompt, language)
+            audio = np.asarray(audio).flatten()
             if sample_rate is None:
                 sample_rate = sr
             audio_parts.append(audio)

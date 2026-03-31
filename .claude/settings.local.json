@@ -5,7 +5,20 @@
       "Bash(sysctl -n machdep.cpu.brand_string)",
       "Bash(sysctl -n hw.memsize)",
       "Read(//Users/konishi/Projects_git/voice_clone/{print $0/**)",
-      "Bash(system_profiler SPHardwareDataType)"
+      "Bash(system_profiler SPHardwareDataType)",
+      "Bash(uv run:*)",
+      "Bash(bash /home1/konishi/konishi_products/voice_clone/setup.sh)",
+      "Bash(curl -L https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -o /tmp/ffmpeg-static.tar.xz)",
+      "Bash(tar -xf /tmp/ffmpeg-static.tar.xz -C /tmp/)",
+      "Bash(mkdir -p ~/.local/bin)",
+      "Bash(cp /tmp/ffmpeg-*-amd64-static/ffmpeg /tmp/ffmpeg-*-amd64-static/ffprobe ~/.local/bin/)",
+      "Bash(echo $PATH)",
+      "Bash(grep -q \"$HOME/.local/bin\")",
+      "Bash(~/.local/bin/ffmpeg -version)",
+      "Bash(curl -L https://downloads.sourceforge.net/project/sox/sox/14.4.2/sox-14.4.2.tar.bz2 -o /tmp/sox-14.4.2.tar.bz2)",
+      "Bash(tar -xjf /tmp/sox-14.4.2.tar.bz2 -C /tmp/)",
+      "Bash(~/.local/bin/sox --version)",
+      "Bash(pkill -f \"python app.py\")"
     ]
   }
 }
