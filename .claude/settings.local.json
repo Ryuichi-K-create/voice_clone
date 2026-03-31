@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chmod:*)",
+      "Bash(sysctl -n machdep.cpu.brand_string)",
+      "Bash(sysctl -n hw.memsize)",
+      "Read(//Users/konishi/Projects_git/voice_clone/{print $0/**)",
+      "Bash(system_profiler SPHardwareDataType)"
+    ]
+  }
+}

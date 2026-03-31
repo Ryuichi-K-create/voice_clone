@@ -1,0 +1,7 @@
+qwen-tts>=0.0.5
+torch>=2.0.0
+soundfile
+pyyaml
+gradio>=4.0.0
+faster-whisper>=1.0.0
+numpy

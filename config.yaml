@@ -1,0 +1,26 @@
+model:
+  name: "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+  device: "auto"       # auto: CUDA → MPS → CPU の順で自動選択
+  dtype: "auto"        # auto: CUDA=bfloat16, MPS/CPU=float32
+
+whisper:
+  model_size: "large-v3"
+  device: "auto"       # auto: CUDA → CPU（faster-whisperはMPS非対応）
+  compute_type: "auto"  # auto: CUDA=float16, CPU=float32
+
+audio:
+  sample_rate: 16000
+  min_duration_sec: 3.0
+  max_duration_sec: 30.0
+
+generation:
+  max_new_tokens: 2048
+  chunk_max_chars: 100
+
+paths:
+  prompts_dir: "prompts"
+  output_dir: "output"
+
+server:
+  host: "0.0.0.0"
+  port: 7860
