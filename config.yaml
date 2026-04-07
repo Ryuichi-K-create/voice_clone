@@ -17,9 +17,17 @@ generation:
   max_new_tokens: 2048
   chunk_max_chars: 100
 
+finetune:
+  default_batch_size: 4
+  default_lr: 2.0e-5
+  default_epochs: 5
+  default_grad_accum: 4
+
 paths:
   prompts_dir: "models"
   output_dir: "output"
+  ft_output_dir: "ft_output"
+  ft_data_dir: "ft_data"
   ffmpeg_dir: "C:/Users/Scent/AppData/Local/Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe/ffmpeg-8.1-full_build/bin"
 
 server:

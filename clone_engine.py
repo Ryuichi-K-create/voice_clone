@@ -138,6 +138,106 @@ class VoiceCloneEngine:
             os.remove(path)
             logger.info(f"Promptを削除しました: {path}")
 
+    # --- ファインチューニング済みモデル関連 ---
+
+    def list_ft_models(self) -> list[str]:
+        """ファインチューニング済みモデル（チェックポイント）一覧を返す。"""
+        ft_dir = _config["paths"].get("ft_output_dir", "ft_output")
+        if not os.path.exists(ft_dir):
+            return []
+        return sorted([
+            d for d in os.listdir(ft_dir)
+            if os.path.isdir(os.path.join(ft_dir, d)) and d.startswith("checkpoint-")
+        ])
+
+    def load_ft_model(self, checkpoint_name: str) -> None:
+        """ファインチューニング済みモデルをロードして切り替える。"""
+        ft_dir = _config["paths"].get("ft_output_dir", "ft_output")
+        checkpoint_path = os.path.join(ft_dir, checkpoint_name)
+        if not os.path.exists(checkpoint_path):
+            raise FileNotFoundError(f"チェックポイントが見つかりません: {checkpoint_path}")
+
+        dtype = _resolve_dtype(_config["model"]["dtype"], self.device)
+        attn_impl = "sdpa"
+        if self.device.startswith("cuda"):
+            try:
+                from flash_attn import flash_attn_func  # noqa: F401
+                attn_impl = "flash_attention_2"
+            except ImportError:
+                pass
+
+        logger.info(f"FTモデルをロード中: {checkpoint_path}")
+        self.model = Qwen3TTSModel.from_pretrained(
+            checkpoint_path,
+            device_map=self.device,
+            dtype=dtype,
+            attn_implementation=attn_impl,
+        )
+        self._ft_checkpoint = checkpoint_name
+        logger.info(f"FTモデルのロード完了: {checkpoint_name}")
+
+    def generate_ft(self, text: str, speaker_name: str, language: str = "Japanese") -> tuple:
+        """
+        ファインチューニング済みモデルでカスタムボイス生成。
+        参照音声プロンプト不要。(numpy_array, sample_rate) を返す。
+        """
+        audio, sample_rate = self.model.generate_custom_voice(
+            text=text,
+            speaker=speaker_name,
+            language=language,
+        )
+        return audio, sample_rate
+
+    def generate_ft_long(
+        self,
+        text: str,
+        speaker_name: str,
+        language: str = "Japanese",
+        max_chars: int | None = None,
+    ) -> tuple:
+        """ファインチューニング済みモデルで長文生成。"""
+        if max_chars is None:
+            max_chars = self.chunk_max_chars
+
+        chunks = re.split(r"(?<=[。！？\n])", text)
+        chunks = [c.strip() for c in chunks if c.strip()]
+
+        final_chunks = []
+        for chunk in chunks:
+            while len(chunk) > max_chars:
+                split_pos = chunk[:max_chars].rfind("、")
+                if split_pos == -1:
+                    split_pos = max_chars
+                else:
+                    split_pos += 1
+                final_chunks.append(chunk[:split_pos])
+                chunk = chunk[split_pos:]
+            if chunk:
+                final_chunks.append(chunk)
+
+        if not final_chunks:
+            final_chunks = [text]
+
+        logger.info(f"[FT] テキストを{len(final_chunks)}チャンクに分割して生成します")
+
+        audio_parts = []
+        sample_rate = None
+
+        for i, chunk in enumerate(final_chunks):
+            logger.info(f"[FT] チャンク {i + 1}/{len(final_chunks)}: {chunk[:30]}...")
+            audio, sr = self.generate_ft(chunk, speaker_name, language)
+            audio = np.asarray(audio).flatten()
+            if sample_rate is None:
+                sample_rate = sr
+            audio_parts.append(audio)
+
+            if i < len(final_chunks) - 1:
+                silence = np.zeros(int(sr * 0.3), dtype=audio.dtype)
+                audio_parts.append(silence)
+
+        combined = np.concatenate(audio_parts)
+        return combined, sample_rate
+
     def generate(self, text: str, prompt: dict, language: str = "Japanese") -> tuple:
         """
         テキストからクローン音声を生成。

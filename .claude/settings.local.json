@@ -25,9 +25,31 @@
       "Bash(curl -L https://downloads.sourceforge.net/project/sox/sox/14.4.2/sox-14.4.2.tar.bz2 -o /tmp/sox-14.4.2.tar.bz2)",
       "Bash(tar -xjf /tmp/sox-14.4.2.tar.bz2 -C /tmp/)",
       "Bash(~/.local/bin/sox --version)",
-      "Bash(pkill -f \"python app.py\")"
+      "Bash(pkill -f \"python app.py\")",
+      "WebSearch",
+      "WebFetch(domain:github.com)"
     ],
-
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(rmdir /s *)",
+      "Bash(del /s *)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git reset --hard *)",
+      "Bash(git clean -fd *)",
+      "Bash(sudo *)",
+      "Bash(format *)",
+      "Bash(mkfs *)",
+      "Read(.env)",
+      "Read(**/.env)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/*secret*)",
+      "Read(**/*credential*)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.claude/.credentials.json)"
+    ],
     "ask": [
       "Bash(pip install *)",
       "Bash(pip3 install *)",
@@ -42,38 +64,11 @@
       "Bash(scoop install *)",
       "Bash(apt install *)",
       "Bash(apt-get install *)",
-
       "Bash(rm -r *)",
-
       "Edit(.claude/settings.json)",
       "Edit(.claude/settings.local.json)",
       "Write(.claude/settings.json)",
       "Write(.claude/settings.local.json)"
-    ],
-
-    "deny": [
-      "Bash(rm -rf *)",
-      "Bash(rmdir /s *)",
-      "Bash(del /s *)",
-
-      "Bash(git push --force *)",
-      "Bash(git push -f *)",
-      "Bash(git reset --hard *)",
-      "Bash(git clean -fd *)",
-
-      "Bash(sudo *)",
-      "Bash(format *)",
-      "Bash(mkfs *)",
-
-      "Read(.env)",
-      "Read(**/.env)",
-      "Read(**/*.pem)",
-      "Read(**/*.key)",
-      "Read(**/*secret*)",
-      "Read(**/*credential*)",
-      "Read(~/.ssh/**)",
-      "Read(~/.aws/**)",
-      "Read(~/.claude/.credentials.json)"
     ]
   },
   "language": "japanese",

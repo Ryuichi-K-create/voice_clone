@@ -147,6 +147,93 @@ def generate_spectrogram(audio_path: str, title: str = "スペクトログラム
     return tmp_path
 
 
+def split_audio_by_silence(
+    audio_path: str,
+    output_dir: str,
+    min_segment_sec: float = 3.0,
+    max_segment_sec: float = 15.0,
+    silence_thresh_db: float = -40.0,
+    min_silence_ms: int = 500,
+) -> list[dict]:
+    """
+    長尺音声を無音区間で分割し、各セグメントをWAVで保存する。
+    戻り値: [{"path": "segment_001.wav", "start": 0.0, "end": 5.2}, ...]
+    """
+    from pydub import AudioSegment
+    from pydub.silence import split_on_silence
+
+    audio = AudioSegment.from_file(audio_path)
+    chunks = split_on_silence(
+        audio,
+        min_silence_len=min_silence_ms,
+        silence_thresh=silence_thresh_db,
+        keep_silence=200,
+    )
+
+    # 短すぎるチャンクを結合、長すぎるチャンクを強制分割
+    merged_chunks = []
+    buffer = AudioSegment.empty()
+    for chunk in chunks:
+        buffer += chunk
+        if len(buffer) >= min_segment_sec * 1000:
+            # 長すぎる場合は強制分割
+            while len(buffer) > max_segment_sec * 1000:
+                merged_chunks.append(buffer[:int(max_segment_sec * 1000)])
+                buffer = buffer[int(max_segment_sec * 1000):]
+            if len(buffer) >= min_segment_sec * 1000:
+                merged_chunks.append(buffer)
+                buffer = AudioSegment.empty()
+
+    # 残りのバッファ処理
+    if len(buffer) > 0:
+        if merged_chunks and len(buffer) < min_segment_sec * 1000:
+            merged_chunks[-1] += buffer
+        else:
+            merged_chunks.append(buffer)
+
+    os.makedirs(output_dir, exist_ok=True)
+    segments = []
+    current_pos = 0.0
+    for i, chunk in enumerate(merged_chunks):
+        duration = len(chunk) / 1000.0
+        seg_path = os.path.join(output_dir, f"segment_{i:04d}.wav")
+        chunk.export(seg_path, format="wav", parameters=["-ar", "24000", "-ac", "1"])
+        segments.append({
+            "path": seg_path,
+            "start": current_pos,
+            "end": current_pos + duration,
+            "duration": duration,
+        })
+        current_pos += duration
+
+    logger.info(f"音声を{len(segments)}セグメントに分割しました（出力先: {output_dir}）")
+    return segments
+
+
+def transcribe_segments(segments: list[dict], language: str = "ja") -> list[dict]:
+    """複数セグメントをまとめてWhisperで書き起こす。各segmentにtextフィールドを追加。"""
+    from faster_whisper import WhisperModel
+
+    logger.info(f"Whisperモデル（{_WHISPER_MODEL_SIZE}）をロード中...")
+    model = WhisperModel(
+        _WHISPER_MODEL_SIZE,
+        device=_WHISPER_DEVICE,
+        compute_type=_WHISPER_COMPUTE_TYPE,
+    )
+
+    for i, seg in enumerate(segments):
+        segs, _info = model.transcribe(seg["path"], language=language)
+        text = "".join(s.text for s in segs).strip()
+        seg["text"] = text
+        logger.info(f"セグメント {i + 1}/{len(segments)}: {text[:50]}...")
+
+    del model
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    return segments
+
+
 def convert_wav_to_mp3(wav_path: str, mp3_path: str, bitrate: str = "192k") -> str:
     """WAVファイルをMP3に変換する。FFmpegを使用。"""
     cmd = [
