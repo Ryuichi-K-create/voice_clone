@@ -150,46 +150,59 @@ def generate_spectrogram(audio_path: str, title: str = "スペクトログラム
 def split_audio_by_silence(
     audio_path: str,
     output_dir: str,
-    min_segment_sec: float = 3.0,
-    max_segment_sec: float = 15.0,
+    num_expected: int | None = None,
+    min_segment_sec: float = 1.0,
+    max_segment_sec: float = 20.0,
     silence_thresh_db: float = -40.0,
     min_silence_ms: int = 500,
 ) -> list[dict]:
     """
     長尺音声を無音区間で分割し、各セグメントをWAVで保存する。
+    num_expected が指定された場合、閾値を自動調整して期待数に近づける。
     戻り値: [{"path": "segment_001.wav", "start": 0.0, "end": 5.2}, ...]
     """
     from pydub import AudioSegment
     from pydub.silence import split_on_silence
 
     audio = AudioSegment.from_file(audio_path)
-    chunks = split_on_silence(
-        audio,
-        min_silence_len=min_silence_ms,
-        silence_thresh=silence_thresh_db,
-        keep_silence=200,
-    )
 
-    # 短すぎるチャンクを結合、長すぎるチャンクを強制分割
+    # 原稿の文数が分かっている場合、閾値を自動調整
+    if num_expected is not None:
+        best_chunks = None
+        best_diff = float("inf")
+        for thresh in range(-60, -20, 2):
+            for min_sil in [300, 400, 500, 600, 800]:
+                chunks = split_on_silence(
+                    audio, min_silence_len=min_sil, silence_thresh=thresh, keep_silence=200,
+                )
+                diff = abs(len(chunks) - num_expected)
+                if diff < best_diff:
+                    best_diff = diff
+                    best_chunks = chunks
+                    silence_thresh_db = thresh
+                    min_silence_ms = min_sil
+                if diff == 0:
+                    break
+            if best_diff == 0:
+                break
+        chunks = best_chunks
+        logger.info(
+            f"自動調整: thresh={silence_thresh_db}dB, min_silence={min_silence_ms}ms "
+            f"→ {len(chunks)}セグメント（期待: {num_expected}）"
+        )
+    else:
+        chunks = split_on_silence(
+            audio, min_silence_len=min_silence_ms,
+            silence_thresh=silence_thresh_db, keep_silence=200,
+        )
+
+    # 極端に短いチャンク（0.5秒未満）は前のチャンクに結合
     merged_chunks = []
-    buffer = AudioSegment.empty()
     for chunk in chunks:
-        buffer += chunk
-        if len(buffer) >= min_segment_sec * 1000:
-            # 長すぎる場合は強制分割
-            while len(buffer) > max_segment_sec * 1000:
-                merged_chunks.append(buffer[:int(max_segment_sec * 1000)])
-                buffer = buffer[int(max_segment_sec * 1000):]
-            if len(buffer) >= min_segment_sec * 1000:
-                merged_chunks.append(buffer)
-                buffer = AudioSegment.empty()
-
-    # 残りのバッファ処理
-    if len(buffer) > 0:
-        if merged_chunks and len(buffer) < min_segment_sec * 1000:
-            merged_chunks[-1] += buffer
+        if merged_chunks and len(chunk) < 500:
+            merged_chunks[-1] += chunk
         else:
-            merged_chunks.append(buffer)
+            merged_chunks.append(chunk)
 
     os.makedirs(output_dir, exist_ok=True)
     segments = []
@@ -210,28 +223,59 @@ def split_audio_by_silence(
     return segments
 
 
-def transcribe_segments(segments: list[dict], language: str = "ja") -> list[dict]:
-    """複数セグメントをまとめてWhisperで書き起こす。各segmentにtextフィールドを追加。"""
-    from faster_whisper import WhisperModel
+def assign_script_to_segments(segments: list[dict], script_lines: list[str]) -> list[dict]:
+    """
+    分割済み音声セグメントに原稿テキストを対応付ける。
+    セグメント数と原稿行数が一致しない場合もできる限り対応付ける。
+    """
+    n_seg = len(segments)
+    n_lines = len(script_lines)
 
-    logger.info(f"Whisperモデル（{_WHISPER_MODEL_SIZE}）をロード中...")
-    model = WhisperModel(
-        _WHISPER_MODEL_SIZE,
-        device=_WHISPER_DEVICE,
-        compute_type=_WHISPER_COMPUTE_TYPE,
-    )
+    if n_seg == n_lines:
+        # 完全一致: そのまま対応付け
+        for seg, line in zip(segments, script_lines):
+            seg["text"] = line
+    elif n_seg > n_lines:
+        # セグメントが多い: 余ったセグメントには直前の文を割り当て
+        for i, seg in enumerate(segments):
+            seg["text"] = script_lines[min(i, n_lines - 1)]
+        logger.warning(
+            f"セグメント数({n_seg})が原稿行数({n_lines})より多いです。"
+            f"余ったセグメントには直前の文を割り当てました。"
+        )
+    else:
+        # 原稿が多い: 長いセグメントに複数文を割り当て
+        # まず1:1で割り当て、残りの文は最後のセグメントに結合
+        for i, seg in enumerate(segments):
+            if i < n_seg - 1:
+                seg["text"] = script_lines[i]
+            else:
+                seg["text"] = "".join(script_lines[i:])
+        logger.warning(
+            f"原稿行数({n_lines})がセグメント数({n_seg})より多いです。"
+            f"残りの文を最後のセグメントに結合しました。"
+        )
 
-    for i, seg in enumerate(segments):
-        segs, _info = model.transcribe(seg["path"], language=language)
-        text = "".join(s.text for s in segs).strip()
-        seg["text"] = text
-        logger.info(f"セグメント {i + 1}/{len(segments)}: {text[:50]}...")
-
-    del model
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-
+    logger.info(f"原稿を{n_seg}セグメントに対応付けました")
     return segments
+
+
+def parse_script(script_text: str) -> list[str]:
+    """
+    原稿テキストをパースして文のリストを返す。
+    「1. テキスト」形式の番号付きリスト、または1行1文として処理。
+    """
+    import re
+    lines = []
+    for line in script_text.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        # 番号付きリスト形式を除去: "1. テキスト" → "テキスト"
+        cleaned = re.sub(r"^\d+[\.\)]\s*", "", line)
+        if cleaned:
+            lines.append(cleaned)
+    return lines
 
 
 def convert_wav_to_mp3(wav_path: str, mp3_path: str, bitrate: str = "192k") -> str:

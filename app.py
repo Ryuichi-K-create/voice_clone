@@ -191,13 +191,24 @@ ft_training_log: list[str] = []
 ft_is_training = False
 
 
-def on_ft_upload(audio_files: list[str] | None) -> tuple[str, str]:
-    """FT用音声アップロード: 分割 + 書き起こし"""
+def on_ft_upload(audio_files: list[str] | None, script_text: str) -> tuple[str, str]:
+    """FT用音声アップロード: 分割 + 原稿テキスト対応付け"""
     if not audio_files:
         raise gr.Error("音声ファイルをアップロードしてください。")
+    if not script_text.strip():
+        raise gr.Error("原稿テキストを入力してください。")
+
+    # 原稿をパース
+    script_lines = audio_utils.parse_script(script_text)
+    if not script_lines:
+        raise gr.Error("原稿テキストから文を抽出できませんでした。")
 
     ft_data_dir = config["paths"].get("ft_data_dir", "ft_data")
     segments_dir = os.path.join(ft_data_dir, "segments")
+    # 既存セグメントをクリア
+    if os.path.exists(segments_dir):
+        import shutil
+        shutil.rmtree(segments_dir)
     os.makedirs(segments_dir, exist_ok=True)
 
     all_segments = []
@@ -210,12 +221,14 @@ def on_ft_upload(audio_files: list[str] | None) -> tuple[str, str]:
         ]
         subprocess.run(cmd, capture_output=True, check=True)
 
-        # 無音区間で分割
-        segments = audio_utils.split_audio_by_silence(tmp_wav, segments_dir)
+        # 無音区間で分割（原稿の文数に合わせて閾値を自動調整）
+        segments = audio_utils.split_audio_by_silence(
+            tmp_wav, segments_dir, num_expected=len(script_lines),
+        )
         all_segments.extend(segments)
 
-    # 書き起こし
-    all_segments = audio_utils.transcribe_segments(all_segments)
+    # 原稿テキストを対応付け
+    all_segments = audio_utils.assign_script_to_segments(all_segments, script_lines)
 
     # 参照音声: 最初のセグメントを使用
     ref_audio = all_segments[0]["path"]
@@ -232,11 +245,13 @@ def on_ft_upload(audio_files: list[str] | None) -> tuple[str, str]:
             f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
     # 確認用テキスト
-    summary = f"分割数: {len(all_segments)}セグメント\n参照音声: {os.path.basename(ref_audio)}\n\n"
+    n_match = "一致" if len(all_segments) == len(script_lines) else f"不一致（原稿{len(script_lines)}文）"
+    summary = f"分割数: {len(all_segments)}セグメント（{n_match}）\n"
+    summary += f"参照音声: {os.path.basename(ref_audio)}\n\n"
     for i, seg in enumerate(all_segments):
         summary += f"[{i + 1}] ({seg['duration']:.1f}秒) {seg['text']}\n"
 
-    status = f"{len(all_segments)}セグメントに分割・書き起こし完了。データ: {jsonl_path}"
+    status = f"{len(all_segments)}セグメントに分割完了。データ: {jsonl_path}"
     return status, summary
 
 
@@ -362,16 +377,36 @@ def on_ft_generate(
     return wav_path, mp3_path, gen_spec
 
 
+def on_ft_load_script_template() -> str:
+    """録音用原稿テンプレートを読み込む。"""
+    script_path = "docs/finetune_script.md"
+    if not os.path.exists(script_path):
+        raise gr.Error("原稿テンプレートが見つかりません。")
+
+    # Markdownから番号付きリスト部分だけ抽出
+    import re
+    lines = []
+    with open(script_path, "r", encoding="utf-8") as f:
+        for line in f:
+            match = re.match(r"^\d+\.\s+(.+)", line.strip())
+            if match:
+                lines.append(line.strip())
+
+    return "\n".join(lines)
+
+
+CUSTOM_CSS = """
+@import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&display=swap');
+* { font-family: 'EB Garamond', 'Times New Roman', Times, serif, 'Noto Sans JP', sans-serif !important; }
+textarea, input, select, button { font-family: 'EB Garamond', 'Times New Roman', Times, serif, 'Noto Sans JP', sans-serif !important; }
+"""
+
+
 def build_ui() -> gr.Blocks:
     """Gradio UIを構築する。"""
-    custom_css = """
-    @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&display=swap');
-    * { font-family: 'EB Garamond', 'Times New Roman', Times, serif, 'Noto Sans JP', sans-serif !important; }
-    textarea, input, select, button { font-family: 'EB Garamond', 'Times New Roman', Times, serif, 'Noto Sans JP', sans-serif !important; }
-    """
     ft_config = config.get("finetune", {})
 
-    with gr.Blocks(title="Voice Clone TTS", theme=gr.themes.Soft(), css=custom_css) as demo:
+    with gr.Blocks(title="Voice Clone TTS") as demo:
         gr.Markdown("# Voice Clone TTS\n自分の声をアップロードして、任意のテキストを音読させよう")
 
         with gr.Tabs():
@@ -439,16 +474,26 @@ def build_ui() -> gr.Blocks:
                 )
 
                 with gr.Group():
-                    gr.Markdown("#### 1. 学習用音声のアップロード")
+                    gr.Markdown("#### 1. 原稿を用意して録音")
+                    gr.Markdown(
+                        "原稿を読み上げた録音と、その原稿テキストをセットでアップロードしてください。\n"
+                        "各文の間に1秒程度の間を空けて読むと、自動分割の精度が上がります。"
+                    )
+                    ft_script_load_btn = gr.Button("録音用原稿テンプレートを読み込む")
+                    ft_script_input = gr.Textbox(
+                        label="原稿テキスト（1行1文、または「1. テキスト」形式）",
+                        lines=10,
+                        placeholder="1. 今日はとても良い天気ですね。\n2. 朝早く起きて、近くの公園を散歩してきました。\n...",
+                    )
                     ft_audio_input = gr.File(
-                        label="音声ファイル（複数可、MP3/WAV/M4A）",
+                        label="録音ファイル（複数可、MP3/WAV/M4A）",
                         file_count="multiple",
                         file_types=["audio"],
                     )
-                    ft_upload_btn = gr.Button("音声を分割・書き起こし", variant="primary")
+                    ft_upload_btn = gr.Button("音声を分割・原稿を対応付け", variant="primary")
                     ft_upload_status = gr.Textbox(label="ステータス", interactive=False)
                     ft_segments_preview = gr.Textbox(
-                        label="セグメント一覧（書き起こし結果）",
+                        label="セグメント一覧（音声と原稿の対応）",
                         lines=10,
                         interactive=False,
                     )
@@ -552,9 +597,13 @@ def build_ui() -> gr.Blocks:
         )
 
         # ファインチューニングタブ
+        ft_script_load_btn.click(
+            fn=on_ft_load_script_template,
+            outputs=[ft_script_input],
+        )
         ft_upload_btn.click(
             fn=on_ft_upload,
-            inputs=[ft_audio_input],
+            inputs=[ft_audio_input, ft_script_input],
             outputs=[ft_upload_status, ft_segments_preview],
         )
         ft_start_btn.click(
@@ -590,4 +639,7 @@ if __name__ == "__main__":
     demo.launch(
         server_name=config["server"]["host"],
         server_port=config["server"]["port"],
+        theme=gr.themes.Soft(),
+        css=CUSTOM_CSS,
+        ssr_mode=False,
     )
