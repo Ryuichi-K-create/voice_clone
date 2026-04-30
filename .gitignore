@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+
+# Gradio
+.gradio/
+
+# 仮想環境
+.venv/
+.venv_*/
+
+# GPT-SoVITS（setup_sovits.sh で再構築可能、サイズ大）
+GPT-SoVITS/

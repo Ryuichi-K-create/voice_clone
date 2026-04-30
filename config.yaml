@@ -1,7 +1,17 @@
+# 使用エンジンのデフォルト（UIで切替可能）
+engine: "qwen3_tts"    # qwen3_tts | gpt_sovits
+
 model:
   name: "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
   device: "auto"       # auto: CUDA → MPS → CPU の順で自動選択
   dtype: "auto"        # auto: CUDA=bfloat16, MPS/CPU=float32
+
+# GPT-SoVITS 設定（subprocess 経由で別 venv の python を呼ぶ）
+gpt_sovits:
+  device: "auto"       # auto / cuda / mps / cpu
+  version: "v2"        # v1 / v2 / v3 / v4 / v2Pro / v2ProPlus
+  text_split_method: "cut5"   # cut0(無分割) / cut1(4文ごと) / cut5(句読点) など
+  python_executable: ""       # 空欄なら GPT-SoVITS/.venv_sovits/bin/python を自動選択
 
 whisper:
   model_size: "large-v3"
@@ -25,10 +35,11 @@ finetune:
 
 paths:
   prompts_dir: "models"
+  sovits_prompts_dir: "models/sovits"   # GPT-SoVITS 用 prompt 保存先（参照音声+テキスト）
   output_dir: "output"
   ft_output_dir: "ft_output"
   ft_data_dir: "ft_data"
-  ffmpeg_dir: "C:/Users/Scent/AppData/Local/Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe/ffmpeg-8.1-full_build/bin"
+  ffmpeg_dir: ""   # 空欄ならシステム PATH の ffmpeg を使用（Windows で WinGet 等の固定パスを使う場合のみ指定）
 
 server:
   host: "0.0.0.0"

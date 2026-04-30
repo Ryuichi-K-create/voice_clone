@@ -27,18 +27,48 @@ else:
     logger.warning(f"CUDA: 無効 (PyTorch版: {torch.__version__}, CUDA版でない場合はGPUが使えません)")
 
 import audio_utils
-logger.info("Qwen3-TTSモジュールを読み込み中（初回は時間がかかります）...")
-from clone_engine import VoiceCloneEngine
-logger.info("読み込み完了")
 
 # 設定ファイル読み込み
 with open("config.yaml", "r", encoding="utf-8") as f:
     config = yaml.safe_load(f)
 
-# グローバルにエンジンを保持（起動時にモデルロード）
-engine: VoiceCloneEngine | None = None
+# エンジン管理: Qwen3-TTS と GPT-SoVITS を遅延ロードし、
+# UI 上のラジオボタンで切替可能にする。
+ENGINE_CHOICES = ["qwen3_tts", "gpt_sovits"]
+ENGINE_LABELS = {"qwen3_tts": "Qwen3-TTS", "gpt_sovits": "GPT-SoVITS"}
+
+engines: dict[str, object] = {}
+engine = None  # 現在アクティブなエンジン
+current_engine_name: str = config.get("engine", "qwen3_tts")
 current_prompt: dict | None = None
 current_prompt_name: str | None = None
+
+
+def _load_engine(name: str):
+    """指定エンジンを遅延ロードして engines dict にキャッシュ。"""
+    if name in engines:
+        return engines[name]
+    if name == "qwen3_tts":
+        logger.info("Qwen3-TTS モジュールを読み込み中（初回は時間がかかります）...")
+        from clone_engine import VoiceCloneEngine
+        engines[name] = VoiceCloneEngine()
+    elif name == "gpt_sovits":
+        logger.info("GPT-SoVITS モジュールを読み込み中...")
+        from sovits_engine import SovitsEngine
+        engines[name] = SovitsEngine()
+    else:
+        raise ValueError(f"未対応のエンジン: {name}")
+    logger.info(f"エンジン {name} のロード完了")
+    return engines[name]
+
+
+def _switch_engine(name: str):
+    """アクティブエンジンを切り替える。グローバル engine を更新。"""
+    global engine, current_engine_name, current_prompt, current_prompt_name
+    engine = _load_engine(name)
+    current_engine_name = name
+    current_prompt = None
+    current_prompt_name = None
 
 
 def on_upload(audio_file: str | None) -> str:
@@ -155,6 +185,16 @@ def on_switch_format(dl_format: str, wav_state: str | None) -> str | None:
         if os.path.exists(mp3_path):
             return mp3_path
     return wav_state
+
+
+def on_engine_change(engine_name: str) -> tuple[gr.update, str]:
+    """エンジン切替: アクティブエンジンを変更し、保存済み一覧を更新する。"""
+    _switch_engine(engine_name)
+    label = ENGINE_LABELS.get(engine_name, engine_name)
+    return (
+        gr.update(choices=engine.list_prompts(), value=None),
+        f"エンジンを「{label}」に切り替えました。",
+    )
 
 
 def on_load_prompt(prompt_name: str | None) -> str:
@@ -344,6 +384,8 @@ def on_ft_load_model(checkpoint_name: str | None) -> str:
     """FTモデルをロードする。"""
     if not checkpoint_name:
         raise gr.Error("チェックポイントを選択してください。")
+    if not hasattr(engine, "load_ft_model"):
+        raise gr.Error("ファインチューニングは Qwen3-TTS でのみ利用できます。エンジンを切り替えてください。")
     engine.load_ft_model(checkpoint_name)
     return f"FTモデル「{checkpoint_name}」をロードしました。"
 
@@ -352,6 +394,8 @@ def on_ft_generate(
     text: str, speaker_name: str, language: str,
 ) -> tuple[str | None, str | None]:
     """FTモデルで音声生成する。"""
+    if not hasattr(engine, "generate_ft_long"):
+        raise gr.Error("ファインチューニングは Qwen3-TTS でのみ利用できます。エンジンを切り替えてください。")
     if not hasattr(engine, "_ft_checkpoint"):
         raise gr.Error("先にFTモデルをロードしてください。")
     if not text.strip():
@@ -406,8 +450,22 @@ def build_ui() -> gr.Blocks:
     """Gradio UIを構築する。"""
     ft_config = config.get("finetune", {})
 
-    with gr.Blocks(title="Voice Clone TTS") as demo:
+    with gr.Blocks(title="Voice Clone TTS", theme=gr.themes.Soft(), css=CUSTOM_CSS) as demo:
         gr.Markdown("# Voice Clone TTS\n自分の声をアップロードして、任意のテキストを音読させよう")
+
+        # === エンジン切替（共通ヘッダ） ===
+        with gr.Row():
+            engine_select = gr.Radio(
+                choices=[(ENGINE_LABELS[k], k) for k in ENGINE_CHOICES],
+                value=current_engine_name,
+                label="TTSエンジン",
+                interactive=True,
+            )
+            engine_status = gr.Textbox(
+                label="エンジンステータス",
+                value=f"現在のエンジン: {ENGINE_LABELS.get(current_engine_name, current_engine_name)}",
+                interactive=False,
+            )
 
         with gr.Tabs():
             # === ボイスクローンタブ（既存） ===
@@ -536,7 +594,11 @@ def build_ui() -> gr.Blocks:
                     gr.Markdown("#### 4. FTモデルで音声生成")
                     ft_model_select = gr.Dropdown(
                         label="チェックポイントを選択",
-                        choices=engine.list_ft_models() if engine else [],
+                        choices=(
+                            engine.list_ft_models()
+                            if engine and hasattr(engine, "list_ft_models")
+                            else []
+                        ),
                     )
                     ft_model_refresh_btn = gr.Button("一覧を更新")
                     ft_load_btn = gr.Button("モデルをロード", variant="primary")
@@ -563,6 +625,13 @@ def build_ui() -> gr.Blocks:
                     ft_gen_spectrogram = gr.Image(label="FT生成音声スペクトログラム")
 
         # --- イベントバインディング ---
+
+        # エンジン切替
+        engine_select.change(
+            fn=on_engine_change,
+            inputs=[engine_select],
+            outputs=[saved_prompts, engine_status],
+        )
 
         # ボイスクローンタブ
         audio_input.change(
@@ -616,7 +685,9 @@ def build_ui() -> gr.Blocks:
             outputs=[ft_log_output],
         )
         ft_model_refresh_btn.click(
-            fn=lambda: gr.update(choices=engine.list_ft_models()),
+            fn=lambda: gr.update(
+                choices=engine.list_ft_models() if hasattr(engine, "list_ft_models") else []
+            ),
             outputs=[ft_model_select],
         )
         ft_load_btn.click(
@@ -634,12 +705,10 @@ def build_ui() -> gr.Blocks:
 
 
 if __name__ == "__main__":
-    engine = VoiceCloneEngine()
+    # config.yaml の engine 値で初期エンジンをロード
+    _switch_engine(current_engine_name)
     demo = build_ui()
     demo.launch(
         server_name=config["server"]["host"],
         server_port=config["server"]["port"],
-        theme=gr.themes.Soft(),
-        css=CUSTOM_CSS,
-        ssr_mode=False,
     )
